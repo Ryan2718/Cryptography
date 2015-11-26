@@ -16,3 +16,7 @@ Find the inverse of a number mod n
 
 Perform the binary operation on two points on an elliptic curve
 to yield a third point on the curve
+
+## Mult
+
+Perform the binary operation multiple times on a single point
