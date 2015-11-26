@@ -10,8 +10,10 @@ module Crypto
        , Polynomial(..)
        , Infinity(..)
        , op
+       , mult
        ) where
 
+import Control.Monad.Trans.Maybe (MaybeT(..))
 import Data.Foldable (foldlM)
 
 -- | Find the greatest common denominator of two integers
@@ -119,7 +121,7 @@ differentiate p@(Polynomial cs) =
 -- 0 \equiv c3*x^3 + (c2-m^2)*x^2 + (c1 - 2bm)*x + (c0 - b^2)
 -- (c2-m^2) = -(r + s + t)  where r,s,t are factors of the cubic
 -- c2-m^2+r+s = -t
--- t = m^2 c2 - r - s
+-- t = m^2 - c2 - r - s
 intersect :: Int -> Point -> Point -> Polynomial -> Polynomial -> Maybe Point
 intersect n (r,_) (s,_) line@(Polynomial [b,m]) (Polynomial [c0,c1,c2,1]) =
   let t = (m^2 - c2 - r - s) `mod` n in
@@ -140,6 +142,7 @@ tangentIntersect c n p@(x,y) = do
 -- | The point "Infinity" found on any elliptic curve mod n
 data Infinity = Infinity deriving (Show, Eq)
 
+{-
 -- | @'op' c n p0 p1@ will find a third point on the curve @c@ mod @n@
 -- given @p0,p1@.
 op :: Polynomial -> Int -> Point -> Point -> Either Infinity (Maybe Point)
@@ -151,3 +154,23 @@ op c n p0@(x0,y0) p1@(x1, y1) =
           else Left Infinity -- Two points on vertical line
      else let b = find_b (x0,y0) m
           in Right (lineMod m b n >>= \l -> intersect n p0 p1 l c)
+-}
+
+-- | @'op' c n p0 p1@ will find a third point on the curve @c@ mod @n@
+-- given @p0,p1@.
+op :: Polynomial -> Int -> Point -> Point -> MaybeT (Either Infinity) Point
+op c n p0@(x0,y0) p1@(x1, y1) =
+  let m = slope p0 p1
+  in if snd m == 0
+     then if fst m == 0
+          then MaybeT (Right $ tangentIntersect c n p0) -- Same point
+          else MaybeT (Left Infinity) -- Two points on vertical line
+     else let b = find_b (x0,y0) m
+          in MaybeT (Right (lineMod m b n >>= \l -> intersect n p0 p1 l c))
+
+-- | @'mult' c n k p@ will, using the curve @c@ mod @n@, add the
+-- point @p@ to itself @k@ times
+mult :: Polynomial -> Int -> Int -> Point -> MaybeT (Either Infinity) Point
+mult c n k p =
+  let o = op c n in
+  foldlM o p (replicate (k-1) p)
