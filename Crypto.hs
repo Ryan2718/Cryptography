@@ -142,20 +142,6 @@ tangentIntersect c n p@(x,y) = do
 -- | The point "Infinity" found on any elliptic curve mod n
 data Infinity = Infinity deriving (Show, Eq)
 
-{-
--- | @'op' c n p0 p1@ will find a third point on the curve @c@ mod @n@
--- given @p0,p1@.
-op :: Polynomial -> Int -> Point -> Point -> Either Infinity (Maybe Point)
-op c n p0@(x0,y0) p1@(x1, y1) =
-  let m = slope p0 p1
-  in if snd m == 0
-     then if fst m == 0
-          then Right $ tangentIntersect c n p0 -- Same point
-          else Left Infinity -- Two points on vertical line
-     else let b = find_b (x0,y0) m
-          in Right (lineMod m b n >>= \l -> intersect n p0 p1 l c)
--}
-
 -- | @'op' c n p0 p1@ will find a third point on the curve @c@ mod @n@
 -- given @p0,p1@.
 op :: Polynomial -> Int -> Point -> Point -> MaybeT (Either Infinity) Point
