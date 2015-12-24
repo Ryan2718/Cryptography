@@ -6,14 +6,12 @@ module Crypto
        , findXY
        , inverseMod
          -- * Elliptic Curves
-       , Point
+       , Point(..)
        , Polynomial(..)
-       , Infinity(..)
        , op
        , mult
        ) where
 
-import Control.Monad.Trans.Maybe (MaybeT(..))
 import Data.Foldable (foldlM)
 
 -- | Find the greatest common denominator of two integers
@@ -71,27 +69,29 @@ inverseMod :: Int -> Int -> Maybe Int
 inverseMod p n = findXY p n >>= return . (\x -> x `mod` n) . fst
 
 -- | Point
-type Point = (Int,Int)
+data Point = Point Int Int | Infinity deriving (Show, Eq)
 type Slope = (Int,Int)
 type Intercept = (Int,Int)
 
-slope :: Point -> Point -> Slope
-slope (x0,y0) (x1,y1) = (y1-y0,x1-x0)
+slope :: Point -> Point -> Maybe Slope
+slope (Point x0 y0) (Point x1 y1) = Just (y1-y0,x1-x0)
+slope _ _ = Nothing
 
 -- y = mx + b
 -- b = y - mx
 -- b = y - (dy/dx)x
 -- b = (dx/dx)y - (dy/dx)x
 -- b = (dx*y - dy*x)/dx
-find_b :: Point -> Slope -> Intercept
-find_b (x,y) (dy,dx) = (dx*y - dy*x, dx)
+find_b :: Point -> Slope -> Maybe Intercept
+find_b (Point x y) (dy,dx) = Just (dx*y - dy*x, dx)
+find_b Infinity _ = Nothing
 
 -- y = (j/k)x + b
 -- y = (j/k)x + (n/d)
 -- y = (d/d)(j/k)x + (k/k)(n/d)
 -- y = (djx/dk) + (kn/dk)
 -- dky = djx + kn
--- y = (djl)x - (kln) where l is the inverse of (dk) mod n
+-- y = (djl)x + (kln) where l is the inverse of (dk) mod n
 lineMod :: Slope -> Intercept -> Int -> Maybe Polynomial
 lineMod (j,k) (n,d) p = do
   l <- (d*k) `inverseMod` p
@@ -123,40 +123,45 @@ differentiate p@(Polynomial cs) =
 -- c2-m^2+r+s = -t
 -- t = m^2 - c2 - r - s
 intersect :: Int -> Point -> Point -> Polynomial -> Polynomial -> Maybe Point
-intersect n (r,_) (s,_) line@(Polynomial [b,m]) (Polynomial [c0,c1,c2,1]) =
+intersect n (Point r _) (Point s _) line@(Polynomial [b,m])
+  (Polynomial [c0,c1,c2,1]) =
   let t = (m^2 - c2 - r - s) `mod` n in
-  Just (t, (-(evaluate line t)) `mod` n)
+   Just (Point t ((-(evaluate line t)) `mod` n))
 intersect _ _ _ _ _  = Nothing
 
 -- y^2=c3*x^3 + c2*x^2 + c1*x + c0
 -- 2yy' = 3c3*x^2 + 2c2x + c1
 -- y' = i(3c3*x^2 + 2c2x + c1) where i is the inverse of 2y mod n
 tangentIntersect :: Polynomial -> Int -> Point -> Maybe Point
-tangentIntersect c n p@(x,y) = do
+tangentIntersect c n p@(Point x y) = do
   i <- (2*y) `inverseMod` n
   let m = ((i * (evaluate (differentiate c) x)) `mod` n,1)
-  let b = find_b p m
+  b <- find_b p m
   l <- lineMod m b n 
   intersect n p p l c
-
--- | The point "Infinity" found on any elliptic curve mod n
-data Infinity = Infinity deriving (Show, Eq)
+tangentIntersect _ _ _ = Nothing
 
 -- | @'op' c n p0 p1@ will find a third point on the curve @c@ mod @n@
 -- given @p0,p1@.
-op :: Polynomial -> Int -> Point -> Point -> MaybeT (Either Infinity) Point
-op c n p0@(x0,y0) p1@(x1, y1) =
-  let m = slope p0 p1
-  in if snd m == 0
-     then if fst m == 0
-          then MaybeT (Right $ tangentIntersect c n p0) -- Same point
-          else MaybeT (Left Infinity) -- Two points on vertical line
-     else let b = find_b (x0,y0) m
-          in MaybeT (Right (lineMod m b n >>= \l -> intersect n p0 p1 l c))
+op :: Polynomial -> Int -> Point -> Point -> Maybe Point
+op c n p0@(Point x0 y0) p1@(Point x1 y1) =
+  let s = slope p0 p1
+  in case s of
+      Just m ->
+        if snd m == 0
+        then if fst m == 0
+             then tangentIntersect c n p0 -- Same point
+             else Just Infinity  -- Two points on vertical line
+        else do
+          b <- find_b (Point x0 y0) m
+          lineMod m b n >>= \l -> intersect n p0 p1 l c
+      Nothing -> Nothing -- Should never get here
+op c n p Infinity = Just p
+op c n Infinity p = Just p
 
 -- | @'mult' c n k p@ will, using the curve @c@ mod @n@, add the
 -- point @p@ to itself @k@ times
-mult :: Polynomial -> Int -> Int -> Point -> MaybeT (Either Infinity) Point
+mult :: Polynomial -> Int -> Int -> Point -> Maybe Point
 mult c n k p =
   let o = op c n in
   foldlM o p (replicate (k-1) p)
